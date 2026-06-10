@@ -136,8 +136,7 @@ app.post('/freedompay/result', async (req, res) => {
       return res.type('xml').send('<?xml version="1.0" encoding="UTF-8"?><response><pg_status>error</pg_status><pg_description>Invalid signature</pg_description></response>');
     }
     const { pg_order_id, pg_payment_id, pg_result } = params;
-console.log('Payment result - order:', pg_order_id, '| result:', pg_result, ...);
-if (String(pg_result) === '1') {
+    console.log('Payment result - order:', pg_order_id, '| result:', pg_result, '| payment_id:', pg_payment_id);if (String(pg_result) === '1') {
   await confirmShopifyOrder(pg_order_id, pg_payment_id);
 }
     }
