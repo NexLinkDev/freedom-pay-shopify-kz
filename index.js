@@ -68,11 +68,12 @@ async function fpInitPayment({ order_id, amount, currency, description, customer
 }
 
 // Validate a Shopify discount code via the Admin GraphQL API and return its value.
+// Uses codeDiscountNodes(query:"code:...") which reliably resolves a code to its rule.
 async function lookupDiscount(code) {
   if (!SHOPIFY_ACCESS_TOKEN) return { ok: false, error: 'Server not configured' };
-  const query = `query($code: String!) {
-    codeDiscountNodeByCode(code: $code) {
-      codeDiscount {
+  const query = `query($q: String!) {
+    codeDiscountNodes(first: 1, query: $q) {
+      edges { node { codeDiscount {
         __typename
         ... on DiscountCodeBasic {
           status
@@ -82,16 +83,20 @@ async function lookupDiscount(code) {
             ... on DiscountAmount { amount { amount currencyCode } }
           } }
         }
-      }
+      } } }
     }
   }`;
   const gql = await axios.post(
     'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/graphql.json',
-    { query, variables: { code } },
+    { query, variables: { q: 'code:' + code } },
     { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
   );
-  const node = gql.data && gql.data.data && gql.data.data.codeDiscountNodeByCode;
-  const disc = node && node.codeDiscount;
+  if (gql.data && gql.data.errors) {
+    console.error('Shopify GraphQL errors:', JSON.stringify(gql.data.errors));
+    return { ok: false, error: 'Ошибка доступа к скидкам' };
+  }
+  const edges = gql.data && gql.data.data && gql.data.data.codeDiscountNodes && gql.data.data.codeDiscountNodes.edges;
+  const disc = edges && edges[0] && edges[0].node && edges[0].node.codeDiscount;
   if (!disc) return { ok: false, error: 'Промокод не найден' };
   if (disc.status && disc.status !== 'ACTIVE') return { ok: false, error: 'Промокод неактивен' };
   const value = disc.customerGets && disc.customerGets.value;
