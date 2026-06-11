@@ -67,6 +67,66 @@ async function fpInitPayment({ order_id, amount, currency, description, customer
   throw new Error(errMatch ? errMatch[1] : 'Payment creation error');
 }
 
+// Validate a Shopify discount code via the Admin GraphQL API and return its value.
+async function lookupDiscount(code) {
+  if (!SHOPIFY_ACCESS_TOKEN) return { ok: false, error: 'Server not configured' };
+  const query = `query($code: String!) {
+    codeDiscountNodeByCode(code: $code) {
+      codeDiscount {
+        __typename
+        ... on DiscountCodeBasic {
+          status
+          customerGets { value {
+            __typename
+            ... on DiscountPercentage { percentage }
+            ... on DiscountAmount { amount { amount currencyCode } }
+          } }
+        }
+      }
+    }
+  }`;
+  const gql = await axios.post(
+    'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/graphql.json',
+    { query, variables: { code } },
+    { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
+  );
+  const node = gql.data && gql.data.data && gql.data.data.codeDiscountNodeByCode;
+  const disc = node && node.codeDiscount;
+  if (!disc) return { ok: false, error: 'Промокод не найден' };
+  if (disc.status && disc.status !== 'ACTIVE') return { ok: false, error: 'Промокод неактивен' };
+  const value = disc.customerGets && disc.customerGets.value;
+  if (value && value.__typename === 'DiscountPercentage') {
+    return { ok: true, type: 'percentage', percentage: Number(value.percentage) || 0 };
+  }
+  if (value && value.__typename === 'DiscountAmount') {
+    return { ok: true, type: 'amount', amount: Number(value.amount && value.amount.amount) || 0, currency: (value.amount && value.amount.currencyCode) || 'KGS' };
+  }
+  return { ok: false, error: 'Тип скидки не поддерживается' };
+}
+
+app.post('/discount/validate', async (req, res) => {
+  try {
+    const { code, cart_total } = req.body;
+    if (!code) return res.json({ valid: false, error: 'Код не указан' });
+    const d = await lookupDiscount(String(code).trim());
+    if (!d.ok) return res.json({ valid: false, error: d.error });
+    const total = Number(cart_total) || 0;
+    let newTotal = total, summary = 'Промокод применён', currency = 'KGS';
+    if (d.type === 'percentage') {
+      newTotal = Math.round(total * (1 - d.percentage));
+      summary = 'Скидка ' + Math.round(d.percentage * 100) + '%';
+    } else if (d.type === 'amount') {
+      currency = d.currency;
+      newTotal = Math.max(0, total - d.amount);
+      summary = 'Скидка ' + d.amount + ' ' + currency;
+    }
+    res.json({ valid: true, summary, new_total: newTotal, currency });
+  } catch (err) {
+    console.error('Discount validate error:', err.message, err.response && JSON.stringify(err.response.data));
+    res.status(500).json({ valid: false, error: 'Ошибка проверки промокода' });
+  }
+});
+
 app.post('/order/create', async (req, res) => {
   try {
     const { items, customer, address, note, discount_code } = req.body;
@@ -88,11 +148,9 @@ app.post('/order/create', async (req, res) => {
         tags: 'freedom-pay',
       }
     };
-if (discount_code) {
-  draftBody.draft_order.use_customer_default_address = false;
-  draftBody.draft_order.applied_discount = null;
-  draftBody.draft_order.discount_codes = [discount_code];
-}
+    // Apply the real Shopify discount code so Shopify recalculates the draft total.
+    if (discount_code) draftBody.draft_order.discount_codes = [String(discount_code).trim()];
+
     const draftRes = await axios.post(
       'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/draft_orders.json',
       draftBody,
@@ -100,7 +158,19 @@ if (discount_code) {
     );
     const draft = draftRes.data.draft_order;
     const orderId = draft.id;
-    const amount = draft.total_price;
+    let amount = draft.total_price;
+
+    // Fallback: if the draft did not apply the code (total unchanged), recompute from the rule.
+    if (discount_code) {
+      try {
+        const d = await lookupDiscount(String(discount_code).trim());
+        if (d.ok) {
+          const base = Number(draft.total_price) || 0;
+          if (d.type === 'percentage') amount = String(Math.round(base * (1 - d.percentage)));
+          else if (d.type === 'amount') amount = String(Math.max(0, base - d.amount));
+        }
+      } catch (e) { /* keep draft.total_price */ }
+    }
 
     const result = await fpInitPayment({
       order_id: orderId,
@@ -139,9 +209,10 @@ app.post('/freedompay/result', async (req, res) => {
       return res.type('xml').send('<?xml version="1.0" encoding="UTF-8"?><response><pg_status>error</pg_status><pg_description>Invalid signature</pg_description></response>');
     }
     const { pg_order_id, pg_payment_id, pg_result } = params;
-    console.log('Payment result - order:', pg_order_id, '| result:', pg_result, '| payment_id:', pg_payment_id);if (String(pg_result) === '1') {
-  await confirmShopifyOrder(pg_order_id, pg_payment_id);
-}
+    console.log('Payment result - order:', pg_order_id, '| result:', pg_result, '| payment_id:', pg_payment_id);
+    if (String(pg_result) === '1') {
+      await confirmShopifyOrder(pg_order_id, pg_payment_id);
+    }
     res.type('xml').send('<?xml version="1.0" encoding="UTF-8"?><response><pg_status>ok</pg_status></response>');
   } catch (err) {
     console.error('Result webhook error:', err.message);
@@ -178,61 +249,7 @@ app.get('/auth/callback', async (req, res) => {
     res.status(500).send('Error: ' + err.message);
   }
 });
-app.post('/discount/validate', async (req, res) => {
-  try {
-    const { code, cart_total } = req.body;
-    if (!code) return res.json({ valid: false, error: 'Код не указан' });
-    if (!SHOPIFY_ACCESS_TOKEN) return res.status(500).json({ valid: false, error: 'Server not configured' });
 
-    const query = `query($code: String!) {
-      codeDiscountNodeByCode(code: $code) {
-        codeDiscount {
-          __typename
-          ... on DiscountCodeBasic {
-            status
-            customerGets { value {
-              __typename
-              ... on DiscountPercentage { percentage }
-              ... on DiscountAmount { amount { amount currencyCode } }
-            } }
-          }
-        }
-      }
-    }`;
-
-    const gql = await axios.post(
-      'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/graphql.json',
-      { query, variables: { code } },
-      { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
-    );
-
-    const node = gql.data && gql.data.data && gql.data.data.codeDiscountNodeByCode;
-    const disc = node && node.codeDiscount;
-    if (!disc || disc.status && disc.status !== 'ACTIVE') {
-      return res.json({ valid: false, error: 'Промокод недействителен или неактивен' });
-    }
-
-    const value = disc.customerGets && disc.customerGets.value;
-    let newTotal = cart_total, summary = 'Промокод применён', currency = 'KGS';
-    const total = Number(cart_total) || 0;
-
-    if (value && value.__typename === 'DiscountPercentage') {
-      const pct = Number(value.percentage) || 0;
-      newTotal = Math.round(total * (1 - pct));
-      summary = 'Скидка ' + Math.round(pct * 100) + '%';
-    } else if (value && value.__typename === 'DiscountAmount') {
-      const amt = Number(value.amount && value.amount.amount) || 0;
-      currency = (value.amount && value.amount.currencyCode) || 'KGS';
-      newTotal = Math.max(0, total - amt);
-      summary = 'Скидка ' + amt + ' ' + currency;
-    }
-
-    res.json({ valid: true, summary, new_total: newTotal, currency });
-  } catch (err) {
-    console.error('Discount validate error:', err.message, err.response && JSON.stringify(err.response.data));
-    res.status(500).json({ valid: false, error: 'Ошибка проверки промокода' });
-  }
-});
 app.get('/', (req, res) => res.json({ status: 'Freedom Pay server running', merchant_id: FREEDOM_MERCHANT_ID }));
 
 const PORT = process.env.PORT || 3000;
