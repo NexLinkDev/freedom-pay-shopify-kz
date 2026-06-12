@@ -67,7 +67,6 @@ async function fpInitPayment({ order_id, amount, currency, description, customer
   throw new Error(errMatch ? errMatch[1] : 'Payment creation error');
 }
 function gidNum(gid){ const m = String(gid||'').match(/\/(\d+)$/); return m ? m[1] : String(gid||''); }
-async function lookupDiscount(code) {
 // Validate a Shopify discount code via the Admin GraphQL API and return its value.
 // Uses codeDiscountNodes(query:"code:...") which reliably resolves a code to its rule.
 async function lookupDiscount(code) {
