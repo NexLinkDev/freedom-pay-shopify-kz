@@ -123,6 +123,7 @@ async function lookupDiscount(code) {
   if (!disc) return { ok: false, error: 'Промокод не найден' };
   if (disc.status && disc.status !== 'ACTIVE') return { ok: false, error: 'Промокод неактивен' };
   const itemsNode = disc.customerGets && disc.customerGets.items;
+  const value = disc.customerGets && disc.customerGets.value;
 let scope = { all: true, productIds: [], variantIds: [] };
 if (itemsNode && itemsNode.__typename === 'DiscountProducts') {
   scope = {
