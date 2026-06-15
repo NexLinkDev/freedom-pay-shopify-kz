@@ -229,8 +229,8 @@ app.post('/order/create', async (req, res) => {
         const d = await lookupDiscount(String(discount_code).trim());
         if (d.ok) {
           const base = Number(draft.total_price) || 0;
-          if (d.type === 'percentage') amount = String(Math.round(base * (1 - d.percentage)));
-          else if (d.type === 'amount') amount = String(Math.max(0, base - d.amount));
+          if (d.type === 'percentage') amount = amount;
+          else if (d.type === 'amount') amount = amount;
         }
       } catch (e) { /* keep draft.total_price */ }
     }
