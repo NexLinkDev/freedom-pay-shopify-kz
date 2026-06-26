@@ -392,7 +392,7 @@ app.post('/order/create-qr', async (req, res) => {
   }
 });
 
-app.post('/kompanion/callback', async (req, res) => {
+app.post('/payment/callback', async (req, res) => {
   try {
     const { txnId, status, sign } = req.body || {};
     if (!txnId || !status) return res.status(200).json({ ok: true });
