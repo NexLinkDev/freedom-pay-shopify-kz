@@ -326,7 +326,7 @@ app.listen(PORT, () => console.log('Server on', PORT));
 
 // ===== Kompanion QR acquiring =====
 const { Pool } = require('pg');
-const KOMPANION_BASE_URL = process.env.KOMPANION_BASE_URL || 'https://partner-qr-backend.kompanion.kg';
+const KOMPANION_BASE_URL = process.env.KOMPANION_BASE_URL || 'https://test-partner-qr-backend.kompanion.kg/';
 const KOMPANION_MERCHANT_ID = process.env.KOMPANION_MERCHANT_ID;
 const KOMPANION_API_KEY = process.env.KOMPANION_API_KEY;
 const KOMPANION_SECRET = process.env.KOMPANION_SECRET;
