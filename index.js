@@ -399,27 +399,7 @@ app.post('/payment/callback', async (req, res) => {
     let amountTyiyn = null;
     if (pgPool) { try { const r = await pgPool.query('SELECT amount FROM kompanion_orders WHERE txn_id = $1', [String(txnId)]); if (r.rows && r.rows[0]) amountTyiyn = r.rows[0].amount; } catch (e) { console.error('kompanion lookup error:', e.message); } }
     if (amountTyiyn === null) { console.error('Kompanion callback: unknown txnId', txnId); return res.status(200).json({ ok: true }); }
-    const expected = kompanionSign(txnId, amountTyiyn);
-console.log('CB DEBUG', JSON.stringify({
-  txnId: String(txnId),
-  status: String(status),
-  amountTyiyn: amountTyiyn,
-  amountType: typeof amountTyiyn,
-  base_no_secret: String(KOMPANION_MERCHANT_ID) + String(txnId) + String(amountTyiyn),
-  expected: expected,
-  got: String(sign),
-  match: String(sign) === expected
-}));
-const mk = (a) => crypto.createHash('sha256')
-  .update(String(KOMPANION_MERCHANT_ID) + String(txnId) + String(a) + String(KOMPANION_SECRET))
-  .digest('hex');
-console.log('CB PROBE', JSON.stringify({
-  got: String(sign),
-  try_380000:   mk('380000'),
-  try_3800:     mk('3800'),
-  try_3800_00:  mk('3800.00'),
-  try_38000000: mk('38000000')
-}));
+   const expected = kompanionSign(txnId, amountTyiyn);
 if (String(sign) !== expected) {
   console.error('Kompanion callback: invalid signature for', txnId);
   return res.status(403).json({ error: 'invalid signature' });
