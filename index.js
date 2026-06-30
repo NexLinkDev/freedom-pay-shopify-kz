@@ -400,7 +400,20 @@ app.post('/payment/callback', async (req, res) => {
     if (pgPool) { try { const r = await pgPool.query('SELECT amount FROM kompanion_orders WHERE txn_id = $1', [String(txnId)]); if (r.rows && r.rows[0]) amountTyiyn = r.rows[0].amount; } catch (e) { console.error('kompanion lookup error:', e.message); } }
     if (amountTyiyn === null) { console.error('Kompanion callback: unknown txnId', txnId); return res.status(200).json({ ok: true }); }
     const expected = kompanionSign(txnId, amountTyiyn);
-    if (String(sign) !== expected) { console.error('Kompanion callback: invalid signature for', txnId); return res.status(403).json({ error: 'invalid signature' }); }
+console.log('CB DEBUG', JSON.stringify({
+  txnId: String(txnId),
+  status: String(status),
+  amountTyiyn: amountTyiyn,
+  amountType: typeof amountTyiyn,
+  base_no_secret: String(KOMPANION_MERCHANT_ID) + String(txnId) + String(amountTyiyn),
+  expected: expected,
+  got: String(sign),
+  match: String(sign) === expected
+}));
+if (String(sign) !== expected) {
+  console.error('Kompanion callback: invalid signature for', txnId);
+  return res.status(403).json({ error: 'invalid signature' });
+}
     if (pgPool) { try { await pgPool.query('UPDATE kompanion_orders SET status = $2 WHERE txn_id = $1', [String(txnId), String(status)]); } catch (e) {} }
     if (status === 'SUCCESS') { await confirmShopifyOrder(txnId, txnId); }
     return res.status(200).json({ ok: true });
