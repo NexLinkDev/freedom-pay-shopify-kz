@@ -40,7 +40,7 @@ async function fpInitPayment({ order_id, amount, currency, description, customer
     pg_merchant_id: FREEDOM_MERCHANT_ID,
     pg_order_id: String(order_id),
     pg_amount: String(amount),
-    pg_currency: currency || 'KGS',
+    pg_currency: currency || 'KZT',
     pg_description: description || 'Order #' + order_id,
     pg_salt: randomSalt(),
     pg_result_url: SERVER_URL + '/freedompay/result',
@@ -151,7 +151,7 @@ if (value && value.__typename === 'DiscountPercentage') {
 if (value && value.__typename === 'DiscountAmount') {
   return Object.assign({}, base, { type: 'amount',
     amount: Number(value.amount && value.amount.amount) || 0,
-    currency: (value.amount && value.amount.currencyCode) || 'KGS' });
+    currency: (value.amount && value.amount.currencyCode) || 'KZT' });
 }
 return { ok: false, error: 'Тип скидки не поддерживается' };
   return { ok: false, error: 'Тип скидки не поддерживается' };
@@ -169,8 +169,7 @@ app.post('/discount/validate', async (req, res) => {
 
         // Минимальная сумма заказа из правила скидки Shopify
         if (d.minSubtotal && total < d.minSubtotal) {
-                return res.json({ valid: false, error: 'Минимальная сумма заказа для промокода — ' + Number(d.minSubtotal).toLocaleString('ru-RU') + ' сом' });
-        }
+        return res.json({ valid: false, error: 'Минимальная сумма заказа для промокода — ' + Number(d.minSubtotal).toLocaleString('ru-RU') + ' тенге' });        }
         if (d.minQty) {
                 const qty = list.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
                 if (qty && qty < d.minQty) {
@@ -195,7 +194,7 @@ app.post('/discount/validate', async (req, res) => {
       return res.json({ valid: false, error: 'Промокод действует только на определённые товары' });
     }
 
-   let newTotal = total, summary = 'Промокод применён', currency = 'KGS';
+   let newTotal = total, summary = 'Промокод применён', currency = 'KZT';
     if (d.type === 'percentage') {
       const discountAmt = Math.round(eligible * d.percentage);   // 0.1 — уже доля, без /100
       newTotal = Math.max(0, total - discountAmt);
@@ -260,7 +259,7 @@ app.post('/order/create', async (req, res) => {
     const result = await fpInitPayment({
       order_id: orderId,
       amount,
-      currency: draft.currency || 'KGS',
+      currency: draft.currency || 'KZT',
       description: 'Order #' + orderId,
       customer_email: customer.email,
       customer_phone: customer.phone,
@@ -328,8 +327,7 @@ app.get('/auth/callback', async (req, res) => {
   const { code, shop } = req.query;
   if (!code) return res.status(400).send('No code provided');
   try {
-    const tokenRes = await axios.post('https://' + (shop || 'aikill.myshopify.com') + '/admin/oauth/access_token', {
-      client_id: process.env.SHOPIFY_API_KEY,
+    const tokenRes = await axios.post('https://' + (shop || 'syhtck-yp.myshopify.com') + '/admin/oauth/access_token', {      client_id: process.env.SHOPIFY_API_KEY,
       client_secret: process.env.SHOPIFY_API_SECRET,
       code
     });
