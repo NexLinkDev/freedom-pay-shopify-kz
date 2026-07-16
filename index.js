@@ -317,6 +317,17 @@ async function confirmShopifyOrder(orderId, paymentId) {
   }
 }
 
+app.get('/auth', (req, res) => {
+  const shop = req.query.shop || 'syhtck-yp.myshopify.com';
+  const scopes = 'read_discounts,write_draft_orders,read_draft_orders,read_orders,write_orders';
+  const redirectUri = (process.env.SERVER_URL || 'https://freedom-pay-shopify-production-7853.up.railway.app') + '/auth/callback';
+  const installUrl = 'https://' + shop + '/admin/oauth/authorize'
+    + '?client_id=' + process.env.SHOPIFY_API_KEY
+    + '&scope=' + encodeURIComponent(scopes)
+    + '&redirect_uri=' + encodeURIComponent(redirectUri);
+  res.redirect(installUrl);
+});
+
 app.get('/auth/callback', async (req, res) => {
   const { code, shop } = req.query;
   if (!code) return res.status(400).send('No code provided');
@@ -327,7 +338,7 @@ app.get('/auth/callback', async (req, res) => {
       code
     });
     const token = tokenRes.data.access_token;
-    res.send('<h2>Installation complete</h2><p>App authorized. Token received by server.</p>');
+    res.send('<h2>Installation complete</h2><p>Access token:</p><textarea rows="3" style="width:100%" readonly>' + token + '</textarea><p>Copy this token into the SHOPIFY_ACCESS_TOKEN env var in Railway, then redeploy.</p>');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
