@@ -66,14 +66,12 @@ async function fpInitPayment({ order_id, amount, currency, description, customer
   const errMatch = response.data.match(/<pg_error_description>(.*?)<\/pg_error_description>/);
   throw new Error(errMatch ? errMatch[1] : 'Payment creation error');
 }
+
 function gidNum(gid){ const m = String(gid||'').match(/\/(\d+)$/); return m ? m[1] : String(gid||''); }
+
 // Validate a Shopify discount code via the Admin GraphQL API and return its value.
-// Uses codeDiscountNodes(query:"code:...") which reliably resolves a code to its rule.
 async function lookupDiscount(code) {
   if (!SHOPIFY_ACCESS_TOKEN) return { ok: false, error: 'Server not configured' };
-  // codeDiscountNodeByCode resolves a code DIRECTLY to its node. (codeDiscountNodes
-  // with a query filter silently ignores the filter and returns the first node,
-  // which made every code resolve to the same discount.)
   const query = `query($code: String!) {
   codeDiscountNodeByCode(code: $code) {
     codeDiscount {
@@ -135,25 +133,27 @@ async function lookupDiscount(code) {
   } else if (minReq && minReq.__typename === 'DiscountMinimumQuantity') {
       minQty = Number(minReq.greaterThanOrEqualToQuantity) || 0;
   }
-let scope = { all: true, productIds: [], variantIds: [] };
-if (itemsNode && itemsNode.__typename === 'DiscountProducts') {
-  scope = {
-    all: false,
-    productIds: (itemsNode.products && itemsNode.products.nodes || []).map(n => n.id),
-    variantIds: (itemsNode.productVariants && itemsNode.productVariants.nodes || []).map(n => n.id)
-  };
-}
-const base = { ok: true, title: disc.title || '', scope,
-  oncePerCustomer: !!disc.appliesOncePerCustomer, usageLimit: disc.usageLimit || null, minSubtotal, minQty };
-if (value && value.__typename === 'DiscountPercentage') {
-  return Object.assign({}, base, { type: 'percentage', percentage: Number(value.percentage) || 0 });
-}
-if (value && value.__typename === 'DiscountAmount') {
-  return Object.assign({}, base, { type: 'amount',
-    amount: Number(value.amount && value.amount.amount) || 0,
-    currency: (value.amount && value.amount.currencyCode) || 'KZT' });
-}
-return { ok: false, error: 'Тип скидки не поддерживается' };
+
+  let scope = { all: true, productIds: [], variantIds: [] };
+  if (itemsNode && itemsNode.__typename === 'DiscountProducts') {
+    scope = {
+      all: false,
+      productIds: (itemsNode.products && itemsNode.products.nodes || []).map(n => n.id),
+      variantIds: (itemsNode.productVariants && itemsNode.productVariants.nodes || []).map(n => n.id)
+    };
+  }
+
+  const base = { ok: true, title: disc.title || '', scope,
+    oncePerCustomer: !!disc.appliesOncePerCustomer, usageLimit: disc.usageLimit || null, minSubtotal, minQty };
+
+  if (value && value.__typename === 'DiscountPercentage') {
+    return Object.assign({}, base, { type: 'percentage', percentage: Number(value.percentage) || 0 });
+  }
+  if (value && value.__typename === 'DiscountAmount') {
+    return Object.assign({}, base, { type: 'amount',
+      amount: Number(value.amount && value.amount.amount) || 0,
+      currency: (value.amount && value.amount.currencyCode) || 'KZT' });
+  }
   return { ok: false, error: 'Тип скидки не поддерживается' };
 }
 
@@ -163,20 +163,18 @@ app.post('/discount/validate', async (req, res) => {
     if (!code) return res.json({ valid: false, error: 'Код не указан' });
     const d = await lookupDiscount(String(code).trim());
     if (!d.ok) return res.json({ valid: false, error: d.error });
-
     const total = Number(cart_total) || 0;
     const list = Array.isArray(items) ? items : [];
-
         // Минимальная сумма заказа из правила скидки Shopify
         if (d.minSubtotal && total < d.minSubtotal) {
-        return res.json({ valid: false, error: 'Минимальная сумма заказа для промокода — ' + Number(d.minSubtotal).toLocaleString('ru-RU') + ' тенге' });        }
+                return res.json({ valid: false, error: 'Минимальная сумма заказа для промокода — ' + Number(d.minSubtotal).toLocaleString('ru-RU') + ' тенге' });
+        }
         if (d.minQty) {
                 const qty = list.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
                 if (qty && qty < d.minQty) {
                           return res.json({ valid: false, error: 'Минимум ' + d.minQty + ' товар(ов) для промокода' });
                 }
         }
-
     // Сумма позиций, на которые распространяется скидка
     let eligible = total;
     if (!d.scope.all && list.length) {
@@ -189,11 +187,9 @@ app.post('/discount/validate', async (req, res) => {
         return match ? sum + (Number(it.line_total) || 0) : sum;
       }, 0);
     }
-
     if (!d.scope.all && eligible <= 0) {
       return res.json({ valid: false, error: 'Промокод действует только на определённые товары' });
     }
-
    let newTotal = total, summary = 'Промокод применён', currency = 'KZT';
     if (d.type === 'percentage') {
       const discountAmt = Math.round(eligible * d.percentage);   // 0.1 — уже доля, без /100
@@ -218,7 +214,6 @@ app.post('/order/create', async (req, res) => {
     if (!customer || !customer.name || !customer.phone || !customer.email) {
       return res.status(400).json({ error: 'Name, phone and email required' });
     }
-
     const draftBody = {
       draft_order: {
         line_items: items.map(i => ({ variant_id: i.variant_id, quantity: i.quantity })),
@@ -233,7 +228,8 @@ app.post('/order/create', async (req, res) => {
       }
     };
     // Apply the real Shopify discount code so Shopify recalculates the draft total.
-    if (discount_code) { try { const __dd = await lookupDiscount(String(discount_code).trim()); if (__dd && __dd.ok) { draftBody.draft_order.applied_discount = (__dd.type === 'percentage') ? { title: __dd.title || String(discount_code).trim(), value_type: 'percentage', value: String((Number(__dd.percentage)||0)*100), description: String(discount_code).trim() } : { title: __dd.title || String(discount_code).trim(), value_type: 'fixed_amount', value: String(Number(__dd.amount)||0), description: String(discount_code).trim() }; } } catch (e) {} }
+    if (discount_code) { try { const __dd = await lookupDiscount(String(discount_code).trim()); if (__dd && __dd.ok)
+    { draftBody.draft_order.applied_discount = (__dd.type === 'percentage') ? { title: __dd.title || String(discount_code).trim(), value_type: 'percentage', value: String((Number(__dd.percentage)||0)*100), description: String(discount_code).trim() } : { title: __dd.title || String(discount_code).trim(), value_type: 'fixed_amount', value: String(Number(__dd.amount)||0), description: String(discount_code).trim() }; } } catch (e) {} }
 
     const draftRes = await axios.post(
       'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/draft_orders.json',
@@ -243,7 +239,6 @@ app.post('/order/create', async (req, res) => {
     const draft = draftRes.data.draft_order;
     const orderId = draft.id;
     let amount = draft.total_price;
-
     // Fallback: if the draft did not apply the code (total unchanged), recompute from the rule.
     if (discount_code) {
       try {
@@ -255,7 +250,6 @@ app.post('/order/create', async (req, res) => {
         }
       } catch (e) { /* keep draft.total_price */ }
     }
-
     const result = await fpInitPayment({
       order_id: orderId,
       amount,
@@ -323,25 +317,17 @@ async function confirmShopifyOrder(orderId, paymentId) {
   }
 }
 
-app.get('/auth', (req, res) => {
-  const shop = req.query.shop || SHOPIFY_STORE;
-  const scopes = 'read_orders,write_orders,read_draft_orders,write_draft_orders,read_discounts';
-  const redirectUri = SERVER_URL + '/auth/callback';
-  const clientId = process.env.SHOPIFY_API_KEY;
-  const installUrl = 'https://' + shop + '/admin/oauth/authorize?client_id=' + clientId + '&scope=' + scopes + '&redirect_uri=' + encodeURIComponent(redirectUri);
-  res.redirect(installUrl);
-});
-
 app.get('/auth/callback', async (req, res) => {
   const { code, shop } = req.query;
   if (!code) return res.status(400).send('No code provided');
   try {
-    const tokenRes = await axios.post('https://' + (shop || 'syhtck-yp.myshopify.com') + '/admin/oauth/access_token', {      client_id: process.env.SHOPIFY_API_KEY,
+    const tokenRes = await axios.post('https://' + (shop || 'syhtck-yp.myshopify.com') + '/admin/oauth/access_token', {
+      client_id: process.env.SHOPIFY_API_KEY,
       client_secret: process.env.SHOPIFY_API_SECRET,
       code
     });
     const token = tokenRes.data.access_token;
-    res.send('<h2>Installation complete</h2><p>Copy this token into Railway as SHOPIFY_ACCESS_TOKEN:</p><pre style="font-size:16px;padding:12px;background:#eee;word-break:break-all">' + token + '</pre>');
+    res.send('<h2>Installation complete</h2><p>App authorized. Token received by server.</p>');
   } catch (err) {
     res.status(500).send('Error: ' + err.message);
   }
@@ -352,7 +338,6 @@ app.get('/', (req, res) => res.json({ status: 'Freedom Pay server running', merc
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('Server on', PORT));
 
-
 // ===== Kompanion QR acquiring =====
 const { Pool } = require('pg');
 const KOMPANION_BASE_URL = process.env.KOMPANION_BASE_URL || 'https://test-partner-qr-backend.kompanion.kg/';
@@ -360,6 +345,7 @@ const KOMPANION_MERCHANT_ID = process.env.KOMPANION_MERCHANT_ID;
 const KOMPANION_API_KEY = process.env.KOMPANION_API_KEY;
 const KOMPANION_SECRET = process.env.KOMPANION_SECRET;
 const pgPool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }) : null;
+
 async function kpInitDb() {
   if (!pgPool) { console.warn('DATABASE_URL not set, Kompanion QR amount store disabled'); return; }
   try {
@@ -367,10 +353,12 @@ async function kpInitDb() {
   } catch (e) { console.error('kpInitDb error:', e.message); }
 }
 kpInitDb();
+
 function kompanionSign(txnId, amountTyiyn) {
   const base = String(KOMPANION_MERCHANT_ID) + String(txnId) + String(amountTyiyn) + String(KOMPANION_SECRET);
   return crypto.createHash('sha256').update(base).digest('hex');
 }
+
 async function kompanionCreateOrder({ order_id, amountSom, purpose, description, return_url }) {
   const txnId = String(order_id);
   const amount = Math.round(Number(amountSom) * 100);
@@ -397,7 +385,7 @@ app.post('/order/create-qr', async (req, res) => {
         tags: 'kompanion-qr',
       }
     };
-    if (discount_code) { try { const __dd = await lookupDiscount(String(discount_code).trim()); if (__dd && __dd.ok) { draftBody.draft_order.applied_discount = (__dd.type === 'percentage') ? { title: __dd.title || String(discount_code), value_type: 'percentage', value: String(__dd.percentage) } : { title: __dd.title || String(discount_code), value_type: 'fixed_amount', value: String(__dd.amount) }; } } catch (e) {} }
+    if (discount_code) { try { const __dd = await lookupDiscount(String(discount_code).trim()); if (__dd && __dd.ok) { draftBody.draft_order.applied_discount = (__dd.type === 'percentage') ? { title: __dd.title || String(discount_code), value_type: 'percentage', value: String((Number(__dd.percentage)||0)*100) } : { title: __dd.title || String(discount_code), value_type: 'fixed_amount', value: String(__dd.amount) }; } } catch (e) {} }
     const draftRes = await axios.post(
       'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/draft_orders.json',
       draftBody,
