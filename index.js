@@ -17,7 +17,7 @@ app.use((req, res, next) => {
 const FREEDOM_MERCHANT_ID = process.env.FREEDOM_MERCHANT_ID;
 const FREEDOM_SECRET_KEY = process.env.FREEDOM_SECRET_KEY;
 const FREEDOM_BASE_URL = process.env.FREEDOM_BASE_URL || 'https://api.freedompay.kz';
-const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'aikill.myshopify.com';
+const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'syhtck-yp.myshopify.com';
 const SERVER_URL = process.env.SERVER_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VER = '2024-01';
@@ -325,7 +325,7 @@ async function confirmShopifyOrder(orderId, paymentId) {
 
 app.get('/auth', (req, res) => {
   const shop = req.query.shop || SHOPIFY_STORE;
-  const scopes = 'read_orders,write_orders,read_draft_orders,write_draft_orders';
+  const scopes = 'read_orders,write_orders,read_draft_orders,write_draft_orders,read_discounts';
   const redirectUri = SERVER_URL + '/auth/callback';
   const clientId = process.env.SHOPIFY_API_KEY;
   const installUrl = 'https://' + shop + '/admin/oauth/authorize?client_id=' + clientId + '&scope=' + scopes + '&redirect_uri=' + encodeURIComponent(redirectUri);
