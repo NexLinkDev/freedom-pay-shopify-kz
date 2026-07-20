@@ -21,6 +21,8 @@ const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'syhtck-yp.myshopify.com';
 const SERVER_URL = process.env.SERVER_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VER = '2024-01';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 function generateSig(scriptName, params, secretKey) {
   const sorted = Object.keys(params).sort().reduce((acc, key) => {
@@ -303,6 +305,35 @@ app.post('/freedompay/result', async (req, res) => {
   }
 });
 
+async function sendOrderToTelegram(orderId) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) { console.warn('Telegram not configured'); return; }
+  try {
+    const durl = 'https://' + SHOPIFY_STORE + '/admin/api/' + API_VER + '/draft_orders/' + orderId + '.json';
+    const dres = await axios.get(durl, { headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN } });
+    const d = dres.data.draft_order;
+    const addr = d.shipping_address || {};
+    const items = (d.line_items || []).map(function(li){ return '\u2022 ' + li.title + ' \u00d7 ' + li.quantity + ' \u2014 ' + li.price + ' ' + (d.currency||''); }).join('\n');
+    const msg =
+      '\ud83d\uded2 \u041d\u043e\u0432\u044b\u0439 \u043e\u043f\u043b\u0430\u0447\u0435\u043d\u043d\u044b\u0439 \u0437\u0430\u043a\u0430\u0437' +
+      '\n\n\u2116 (draft): ' + orderId +
+      (d.name ? '\n\u0417\u0430\u043a\u0430\u0437: ' + d.name : '') +
+      '\n\n\u0422\u043e\u0432\u0430\u0440\u044b:\n' + items +
+      '\n\n\u0421\u0443\u043c\u043c\u0430: ' + d.total_price + ' ' + (d.currency||'') +
+      (d.applied_discount ? '\n\u0421\u043a\u0438\u0434\u043a\u0430: ' + d.applied_discount.title + ' (' + d.applied_discount.value + ')' : '') +
+      '\n\n\u041a\u043b\u0438\u0435\u043d\u0442: ' + (addr.name || '') +
+      '\n\u0422\u0435\u043b\u0435\u0444\u043e\u043d: ' + (addr.phone || d.phone || '') +
+      '\nEmail: ' + (d.email || '') +
+      '\n\u0410\u0434\u0440\u0435\u0441: ' + (addr.address1 || '') +
+      (d.note ? '\n\n\u041f\u0440\u0438\u043c\u0435\u0447\u0430\u043d\u0438\u0435: ' + d.note : '') +
+      (d.tags ? '\n\u041c\u0435\u0442\u043e\u0434: ' + d.tags : '');
+    await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage',
+      { chat_id: TELEGRAM_CHAT_ID, text: msg }, { timeout: 10000 });
+    console.log('Telegram notification sent for order', orderId);
+  } catch (e) {
+    console.error('Telegram send error:', e.message, e.response && JSON.stringify(e.response.data));
+  }
+}
+
 async function confirmShopifyOrder(orderId, paymentId) {
   if (!SHOPIFY_ACCESS_TOKEN) { console.warn('SHOPIFY_ACCESS_TOKEN not set'); return; }
   try {
@@ -312,6 +343,7 @@ async function confirmShopifyOrder(orderId, paymentId) {
       headers: { 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN, 'Content-Type': 'application/json' },
     });
     console.log('Draft order', orderId, 'completed (paid). FP payment:', paymentId);
+    await sendOrderToTelegram(orderId);
   } catch (err) {
     console.error('Draft complete error:', err.message, err.response && JSON.stringify(err.response.data));
   }
